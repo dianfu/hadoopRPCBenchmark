@@ -22,7 +22,7 @@
   <name>hadoopRPCBenchmark</name>
 
   <properties>
-    <hadoop.version>2.7.2</hadoop.version>
+    <hadoop.version>3.0.0-SNAPSHOT</hadoop.version>
     <felix.version>2.4.0</felix.version>
     <protobuf.version>2.5.0</protobuf.version>
     <protoc.path></protoc.path>
@@ -83,7 +83,6 @@
             </goals>
             <configuration>
               <protocVersion>${protobuf.version}</protocVersion>
-              <!--<protocCommand>${protoc.path}</protocCommand>-->
               <imports>
                 <param>${basedir}/src/main/proto</param>
               </imports>

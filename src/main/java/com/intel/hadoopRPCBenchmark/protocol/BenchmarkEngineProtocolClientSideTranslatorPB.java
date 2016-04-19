@@ -43,10 +43,9 @@ public class BenchmarkEngineProtocolClientSideTranslatorPB implements
     RPC.setProtocolEngine(conf, BenchmarkEngineProtocolPB.class,
       ProtobufRpcEngine.class);
     UserGroupInformation ugi = UserGroupInformation.getCurrentUser();
-    rpcProxy = RPC.getProtocolProxy(BenchmarkEngineProtocolPB.class,
+    rpcProxy = RPC.getProxy(BenchmarkEngineProtocolPB.class,
       RPC.getProtocolVersion(BenchmarkEngineProtocolPB.class), nameNodeAddr, ugi,
-      conf, NetUtils.getSocketFactory(conf, BenchmarkEngineProtocolPB.class),
-      org.apache.hadoop.ipc.Client.getPingInterval(conf), null).getProxy();
+      conf, NetUtils.getSocketFactory(conf, BenchmarkEngineProtocolPB.class));
   }
 
   public void close() throws IOException {
