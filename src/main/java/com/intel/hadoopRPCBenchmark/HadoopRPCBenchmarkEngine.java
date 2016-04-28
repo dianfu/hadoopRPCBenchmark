@@ -36,8 +36,12 @@ import java.io.File;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.security.PrivilegedExceptionAction;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Properties;
 import java.util.Random;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadPoolExecutor;
 
 public class HadoopRPCBenchmarkEngine {
   private static final String ADDRESS = "0.0.0.0";
@@ -52,11 +56,12 @@ public class HadoopRPCBenchmarkEngine {
   private EnginePreparer enginePreparer;
 
   private UserGroupInformation clientUgi;
-  private String mode;
   private int packetSize;
-  private long packetNum;
+  private int clientNum;
+  private int execTime;
 
-  public HadoopRPCBenchmarkEngine(String mode, int packetSize, long packetNum)
+  public HadoopRPCBenchmarkEngine(String mode, int packetSize, int clientNum,
+                                  int execTime)
     throws IOException {
     if (mode.equalsIgnoreCase("simple")) {
       if (SecurityUtil.getAuthenticationMethod(conf) !=
@@ -77,9 +82,9 @@ public class HadoopRPCBenchmarkEngine {
     } else {
       throw new IOException("Mode: " + mode + " not supported!");
     }
-    this.mode = mode;
     this.packetSize = packetSize;
-    this.packetNum = packetNum;
+    this.clientNum = clientNum;
+    this.execTime = execTime;
   }
 
   interface EnginePreparer {
@@ -190,6 +195,7 @@ public class HadoopRPCBenchmarkEngine {
       .setBindAddress(ADDRESS)
       .setPort(0)
       .setSecretManager(sm)
+      .setNumHandlers(10)
       .build();
     server.start();
   }
@@ -200,29 +206,35 @@ public class HadoopRPCBenchmarkEngine {
     }
   }
 
-  private void doTest() throws Exception {
-    BenchmarkEngineProtocol proxy = null;
+  class DoThoughputTest implements Runnable {
+    private long pingCount = 0;
 
-    try {
-      // create a client
-      proxy = getRPCProxy();
+    public DoThoughputTest() {}
 
-      byte[] payload = new byte[packetSize];
-      new Random().nextBytes(payload);
+    public long getPingCount() {
+      return pingCount;
+    }
 
-      System.out.println("Mode: " + mode +", Packet size: " + packetSize +
-        ", Packet number: " + packetNum);
+    public void run() {
+      BenchmarkEngineProtocol proxy = null;
 
-      long start = System.currentTimeMillis();
-      for (long iter = 0; iter < packetNum; iter++) {
-        proxy.ping(payload);
-      }
-      long end = System.currentTimeMillis();
+      try {
+        // create a client
+        proxy = getRPCProxy();
 
-      System.out.println("time used (ms): " + (end - start));
-    } finally {
-      if (proxy != null) {
-        RPC.stopProxy(proxy);
+        byte[] payload = new byte[packetSize];
+        new Random().nextBytes(payload);
+
+        while(true) {
+          proxy.ping(payload);
+          pingCount++;
+        }
+      } catch (Exception e) {
+        // Ignore the exception
+      } finally {
+        if (proxy != null) {
+          RPC.stopProxy(proxy);
+        }
       }
     }
   }
@@ -244,13 +256,35 @@ public class HadoopRPCBenchmarkEngine {
     return proxy;
   }
 
-  public void testRPCPerformance() throws Exception {
+  public void testRPCThoughput() throws Exception {
     // Start RPC engine
     enginePreparer.prepareServer();
     startRPCServer();
 
     enginePreparer.prepareClient();
-    doTest();
+    ThreadPoolExecutor executor = (ThreadPoolExecutor) Executors.newCachedThreadPool();
+    List<DoThoughputTest> tasks = new ArrayList<DoThoughputTest>(clientNum);
+    long start = System.currentTimeMillis();
+    for (int i = 0; i <= clientNum; i++)
+    {
+      DoThoughputTest task = new DoThoughputTest();
+      executor.execute(task);
+      tasks.add(task);
+    }
+    while (true) {
+      long end = System.currentTimeMillis();
+      if (end - start <= execTime * 1000) {
+        Thread.sleep(1000);
+      } else {
+        break;
+      }
+    }
+    long totalPingCount = 0;
+    for (DoThoughputTest task : tasks) {
+      totalPingCount += task.getPingCount();
+    }
+    System.out.println("Total ping count: " + totalPingCount);
+    executor.shutdown();
 
     // Stop RPC engine
     enginePreparer.cleanup();
@@ -260,7 +294,8 @@ public class HadoopRPCBenchmarkEngine {
   private static final String USAGE = "Usage: run "
     + " [-mode simple|kerberos|token]\n\t"
     + " [-packetsize Size[B|KB|MB]\n\t"
-    + " [-packetnum N]";
+    + " [-clientnum N]\n\t"
+    + " [-exectime N]";
 
   enum ByteMultiple {
     B(1),
@@ -302,21 +337,24 @@ public class HadoopRPCBenchmarkEngine {
   public static void main(String[] args) throws Exception {
     String mode = "simple";
     int packetSize = 1024; // default 1KB
-    long packetNum = 1024 * 1024; // default 1M packets
+    int clientNum = 1024; // default 1024 clients
+    int execTime = 60; // default 60s
 
     for (int i = 0; i < args.length; i++) { // parse command line
       if (StringUtils.toLowerCase(args[i]).startsWith("-mode")) {
         mode = args[++i];
       } else if (StringUtils.toLowerCase(args[i]).startsWith("-packetsize")) {
         packetSize = parseSize(args[++i]);
-      } else if (StringUtils.toLowerCase(args[i]).startsWith("-packetnum")) {
-        packetNum = Long.parseLong(args[++i]);
+      } else if (StringUtils.toLowerCase(args[i]).startsWith("-clientnum")) {
+        clientNum = Integer.parseInt(args[++i]);
+      } else if (StringUtils.toLowerCase(args[i]).startsWith("-exectime")) {
+        execTime = Integer.parseInt(args[++i]);
       } else {
         System.out.println(USAGE);
       }
     }
     HadoopRPCBenchmarkEngine engine = new HadoopRPCBenchmarkEngine(mode,
-      packetSize, packetNum);
-    engine.testRPCPerformance();
+      packetSize, clientNum, execTime);
+    engine.testRPCThoughput();
   }
 }

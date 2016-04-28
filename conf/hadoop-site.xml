@@ -31,4 +31,8 @@
     <name>hadoop.rpc.protection</name>
     <value>privacy</value>
   </property>
+  <property>
+    <name>hadoop.rpc.security.crypto.cipher.suites</name>
+    <value>AES/CTR/NoPadding</value>
+  </property>
 </configuration>
